@@ -31,16 +31,20 @@ export function useHandTracking({
     gesture: 'none',
     cursorPosition: null,
     rawCursorPosition: null,
+    normalizedCursorPosition: null,
     confidence: 0,
     landmarks: null,
     fps: 0,
   });
+
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const landmarkerRef = useRef<HandLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
   const lastVideoTimeRef = useRef<number>(-1);
+  const lastTimestampRef = useRef<number>(0);
 
   // FPS calculation refs
   const frameCountRef = useRef<number>(0);
@@ -58,7 +62,7 @@ export function useHandTracking({
 
   /**
    * Initialize MediaPipe HandLandmarker model.
-   * Tries local assets first, falls back to CDN.
+   * Tries local assets first, falls back gracefully to CDN.
    */
   const initializeLandmarker = useCallback(async (): Promise<HandLandmarker> => {
     if (landmarkerRef.current) {
@@ -67,41 +71,55 @@ export function useHandTracking({
 
     setState((s) => ({ ...s, modelStatus: 'loading', errorMessage: null }));
 
+    // Try resolving vision wasm from local then CDN
+    const wasmCandidatePaths = [
+      `${window.location.origin}/wasm`,
+      '/wasm',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1/wasm',
+    ];
+
     let vision = null;
-    try {
-      // First attempt: local WASM assets
-      vision = await FilesetResolver.forVisionTasks('/wasm');
-    } catch (localWasmErr) {
-      console.warn('Local WASM loading failed, falling back to CDN:', localWasmErr);
-      // Fallback: CDN WASM assets
-      vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1/wasm'
-      );
+    let wasmErr: unknown = null;
+
+    for (const wasmPath of wasmCandidatePaths) {
+      try {
+        vision = await FilesetResolver.forVisionTasks(wasmPath);
+        if (vision) break;
+      } catch (err) {
+        wasmErr = err;
+        console.warn(`Failed resolving WASM from ${wasmPath}, trying next...`, err);
+      }
     }
 
-    let landmarker: HandLandmarker | null = null;
+    if (!vision) {
+      const errMsg = 'Failed to load MediaPipe WASM runtime from local and CDN sources.';
+      setState((s) => ({ ...s, modelStatus: 'error', errorMessage: errMsg }));
+      throw wasmErr || new Error(errMsg);
+    }
 
-    try {
-      // First attempt: local model
-      landmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: '/models/hand_landmarker.task',
-          delegate: 'GPU',
-        },
-        runningMode: 'VIDEO',
-        numHands: 1,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
-    } catch (localModelErr) {
-      console.warn('Local model loading failed, falling back to Cloud model:', localModelErr);
+    // Try model options: Local GPU -> Local CPU -> Remote GPU -> Remote CPU
+    const modelCandidates = [
+      { path: `${window.location.origin}/models/hand_landmarker.task`, delegate: 'GPU' as const },
+      { path: `${window.location.origin}/models/hand_landmarker.task`, delegate: 'CPU' as const },
+      {
+        path: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'GPU' as const,
+      },
+      {
+        path: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'CPU' as const,
+      },
+    ];
+
+    let landmarker: HandLandmarker | null = null;
+    let modelErr: unknown = null;
+
+    for (const candidate of modelCandidates) {
       try {
         landmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-            delegate: 'GPU',
+            modelAssetPath: candidate.path,
+            delegate: candidate.delegate,
           },
           runningMode: 'VIDEO',
           numHands: 1,
@@ -109,21 +127,19 @@ export function useHandTracking({
           minHandPresenceConfidence: 0.5,
           minTrackingConfidence: 0.5,
         });
-      } catch (_cloudErr) {
-        console.warn('Cloud model loading failed, falling back to CPU delegate:', _cloudErr);
-        // Fallback without GPU delegate if WebGL is unavailable
-        landmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: '/models/hand_landmarker.task',
-            delegate: 'CPU',
-          },
-          runningMode: 'VIDEO',
-          numHands: 1,
-          minHandDetectionConfidence: 0.5,
-          minHandPresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
+        if (landmarker) {
+          break;
+        }
+      } catch (err) {
+        modelErr = err;
+        console.warn(`Failed loading model (${candidate.path}, delegate ${candidate.delegate}):`, err);
       }
+    }
+
+    if (!landmarker) {
+      const errMsg = 'Failed to load HandLandmarker model file.';
+      setState((s) => ({ ...s, modelStatus: 'error', errorMessage: errMsg }));
+      throw modelErr || new Error(errMsg);
     }
 
     landmarkerRef.current = landmarker;
@@ -142,7 +158,13 @@ export function useHandTracking({
       if (video && landmarker && video.readyState >= 2) {
         if (video.currentTime !== lastVideoTimeRef.current) {
           lastVideoTimeRef.current = video.currentTime;
-          const timestamp = performance.now();
+
+          // Ensure monotonic timestamp for MediaPipe
+          let timestamp = performance.now();
+          if (timestamp <= lastTimestampRef.current) {
+            timestamp = lastTimestampRef.current + 1;
+          }
+          lastTimestampRef.current = timestamp;
 
           // Calculate FPS
           if (lastFpsTimestampRef.current === 0) {
@@ -171,7 +193,7 @@ export function useHandTracking({
               // Landmark 8 is the index finger tip
               const indexTip = rawLandmarks[8];
 
-              // In mirrored webcam view, the X-coordinate is flipped
+              // In mirrored webcam view, the X-coordinate is flipped horizontally
               const mirroredNormX = 1 - indexTip.x;
               const rawX = mirroredNormX * dimsRef.current.width;
               const rawY = indexTip.y * dimsRef.current.height;
@@ -179,12 +201,20 @@ export function useHandTracking({
               const rawPos: Point = { x: rawX, y: rawY };
               const smoothedPos = smootherRef.current.smooth(rawPos);
 
+              const normW = dimsRef.current.width || window.innerWidth || 1;
+              const normH = dimsRef.current.height || window.innerHeight || 1;
+              const smoothedNormPos: Point = {
+                x: Math.max(0, Math.min(1, smoothedPos.x / normW)),
+                y: Math.max(0, Math.min(1, smoothedPos.y / normH)),
+              };
+
               setState((s) => ({
                 ...s,
                 handDetected: true,
                 gesture: stableGesture,
                 cursorPosition: smoothedPos,
                 rawCursorPosition: rawPos,
+                normalizedCursorPosition: smoothedNormPos,
                 landmarks: rawLandmarks,
                 confidence: 0.9,
               }));
@@ -198,6 +228,7 @@ export function useHandTracking({
                 gesture: 'none',
                 cursorPosition: null,
                 rawCursorPosition: null,
+                normalizedCursorPosition: null,
                 landmarks: null,
                 confidence: 0,
               }));
@@ -231,6 +262,8 @@ export function useHandTracking({
       streamRef.current = null;
     }
 
+    setStream(null);
+
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -246,6 +279,7 @@ export function useHandTracking({
       gesture: 'none',
       cursorPosition: null,
       rawCursorPosition: null,
+      normalizedCursorPosition: null,
       landmarks: null,
       fps: 0,
     }));
@@ -272,7 +306,7 @@ export function useHandTracking({
         throw new Error('Your browser does not support webcam media access.');
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
@@ -281,16 +315,21 @@ export function useHandTracking({
         audio: false,
       });
 
-      streamRef.current = stream;
+      streamRef.current = mediaStream;
+      setStream(mediaStream);
 
-      // 3. Connect stream to video element
+      // 3. Connect stream to tracking video element
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const video = videoRef.current;
+        video.srcObject = mediaStream;
+        video.muted = true;
         await new Promise<void>((resolve) => {
-          if (!videoRef.current) return resolve();
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current?.play().then(() => resolve()).catch(() => resolve());
+          video.onloadedmetadata = () => {
+            video.play().then(() => resolve()).catch(() => resolve());
           };
+          if (video.readyState >= 1) {
+            video.play().then(() => resolve()).catch(() => resolve());
+          }
         });
       }
 
@@ -332,6 +371,18 @@ export function useHandTracking({
     }
   }, [initializeLandmarker, startTrackingLoop, stopCamera]);
 
+  // Synchronize stream with videoRef whenever stream changes or video element mounts
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      const video = videoRef.current;
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
+        video.muted = true;
+        video.play().catch((err) => console.warn('Tracking video play error:', err));
+      }
+    }
+  }, [stream]);
+
   // Clean up on component unmount
   useEffect(() => {
     return () => {
@@ -350,6 +401,7 @@ export function useHandTracking({
   return {
     state,
     videoRef,
+    stream,
     startCamera,
     stopCamera,
     retry: startCamera,

@@ -8,7 +8,7 @@ import { HAND_CONNECTIONS } from '../utils/gestureUtils';
 import { Minimize2, Maximize2, ShieldCheck, Video, Zap } from 'lucide-react';
 
 interface CameraPreviewProps {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  stream: MediaStream | null;
   cameraActive: boolean;
   cameraStatus: CameraStatus;
   handDetected: boolean;
@@ -20,7 +20,7 @@ interface CameraPreviewProps {
 }
 
 export const CameraPreview: React.FC<CameraPreviewProps> = ({
-  videoRef,
+  stream,
   cameraActive,
   handDetected,
   gesture,
@@ -29,8 +29,27 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   fps,
   onStartCamera,
 }) => {
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
+
+  // Synchronize stream with preview video element whenever stream, cameraActive, or isMinimized changes
+  useEffect(() => {
+    const video = previewVideoRef.current;
+    if (!video) return;
+
+    if (cameraActive && stream) {
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
+      }
+      video.muted = true;
+      video.play().catch((err) => {
+        console.warn('Camera preview video play interrupted:', err);
+      });
+    } else {
+      video.srcObject = null;
+    }
+  }, [stream, cameraActive, isMinimized]);
 
   // Render hand landmark skeleton onto overlay canvas
   useEffect(() => {
@@ -57,9 +76,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
       const p1 = landmarks[startIdx];
       const p2 = landmarks[endIdx];
 
-      // Note: Video preview is mirrored with CSS `scaleX(-1)`.
-      // The canvas on top is also mirrored or we draw in standard coordinates matching the mirrored feed.
-      // If the canvas container is mirrored with CSS `scaleX(-1)`, we can use raw normalized coordinates:
+      // Video preview and canvas are both mirrored with CSS `scaleX(-1)`.
       const x1 = p1.x * w;
       const y1 = p1.y * h;
       const x2 = p2.x * w;
@@ -86,7 +103,12 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
       if (i === 8) {
         // Highlight Index Fingertip with distinct glowing rings
         ctx.arc(x, y, 7, 0, Math.PI * 2);
-        ctx.fillStyle = gesture === 'draw' ? '#22D3EE' : '#F59E0B';
+        ctx.fillStyle =
+          gesture === 'erase'
+            ? '#F43F5E'
+            : gesture === 'draw'
+            ? '#22D3EE'
+            : '#F59E0B';
         ctx.fill();
 
         ctx.lineWidth = 2;
@@ -95,7 +117,12 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
 
         ctx.beginPath();
         ctx.arc(x, y, 12, 0, Math.PI * 2);
-        ctx.strokeStyle = gesture === 'draw' ? 'rgba(34,211,238,0.7)' : 'rgba(245,158,11,0.7)';
+        ctx.strokeStyle =
+          gesture === 'erase'
+            ? 'rgba(244,63,94,0.8)'
+            : gesture === 'draw'
+            ? 'rgba(34,211,238,0.7)'
+            : 'rgba(245,158,11,0.7)';
         ctx.stroke();
       } else {
         ctx.arc(x, y, 3, 0, Math.PI * 2);
@@ -120,7 +147,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         </p>
         <button
           onClick={onStartCamera}
-          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-violet-600/30 transition-all flex items-center justify-center gap-2"
+          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-violet-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
         >
           <Zap className="w-3.5 h-3.5" />
           Start Air Tracking
@@ -149,7 +176,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
 
         <button
           onClick={() => setIsMinimized(!isMinimized)}
-          className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           title={isMinimized ? 'Expand preview' : 'Minimize preview'}
         >
           {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minimize2 className="w-3.5 h-3.5" />}
@@ -160,7 +187,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         <div className="relative aspect-[4/3] bg-black overflow-hidden">
           {/* Mirrored webcam video */}
           <video
-            ref={videoRef}
+            ref={previewVideoRef}
             autoPlay
             playsInline
             muted
@@ -180,14 +207,18 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
             {handDetected ? (
               <div
                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase shadow-lg backdrop-blur-md border ${
-                  gesture === 'draw'
+                  gesture === 'erase'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-400/50 shadow-rose-500/20'
+                    : gesture === 'draw'
                     ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/50 shadow-cyan-500/20'
                     : gesture === 'hover'
                     ? 'bg-amber-500/20 text-amber-300 border-amber-400/50 shadow-amber-500/20'
                     : 'bg-slate-800/80 text-slate-300 border-slate-700'
                 }`}
               >
-                {gesture === 'draw'
+                {gesture === 'erase'
+                  ? '🧹 Erasing'
+                  : gesture === 'draw'
                   ? '✍️ Drawing'
                   : gesture === 'hover'
                   ? '👆 Hover / Move'

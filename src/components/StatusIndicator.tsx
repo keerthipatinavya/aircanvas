@@ -50,8 +50,7 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         <Info className="w-3.5 h-3.5 text-violet-400 shrink-0" />
         {cameraActive ? (
           <span>
-            <strong className="text-violet-300">Air Gesture:</strong> Index finger extended =
-            Draw &bull; Index + Middle = Hover / Move cursor
+            <strong className="text-violet-300">Air Gestures:</strong> ☝️ 1 Finger = Draw &bull; ✌️ 2 Fingers = Hover &bull; 🖐️ Open Palm = Erase
           </span>
         ) : (
           <span>
@@ -72,7 +71,9 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
             />
             <span className="text-[11px] font-medium text-slate-300">
               {handDetected
-                ? gesture === 'draw'
+                ? gesture === 'erase'
+                  ? '🧹 Erasing'
+                  : gesture === 'draw'
                   ? '✍️ Drawing'
                   : gesture === 'hover'
                   ? '👆 Hovering'

@@ -68,8 +68,9 @@ export function isFingerExtended(
 
 /**
  * Geometric Rule-Based Gesture Classification:
- * - DRAW: Index extended, Middle folded (Ring & Pinky folded)
- * - HOVER / MOVE: Index extended AND Middle extended (two fingers up)
+ * - DRAW: Index extended, Middle folded (1 finger up)
+ * - HOVER / MOVE: Index extended AND Middle extended, ring/pinky folded (2 fingers up - peace sign)
+ * - ERASE: Open Palm / 3+ fingers extended (wiping gesture)
  * - STOP / INACTIVE: Index folded, fist, or other poses
  */
 export function classifyGesture(landmarks: HandLandmark[]): {
@@ -97,6 +98,17 @@ export function classifyGesture(landmarks: HandLandmark[]): {
   const ringExtended = isFingerExtended(landmarks, 16, 14, 13);
   // Pinky: tip 20, pip 18, mcp 17
   const pinkyExtended = isFingerExtended(landmarks, 20, 18, 17);
+
+  // Erase rule: Open hand / palm (index + middle + ring/pinky extended)
+  if (indexExtended && middleExtended && (ringExtended || pinkyExtended)) {
+    return {
+      gesture: 'erase',
+      indexExtended,
+      middleExtended,
+      ringExtended,
+      pinkyExtended,
+    };
+  }
 
   // Draw rule: Index is exclusively extended, middle is folded
   if (indexExtended && !middleExtended) {

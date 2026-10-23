@@ -81,12 +81,29 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({
               </div>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Extend both <strong>index and middle fingers</strong> together.
+              Extend both <strong>index and middle fingers</strong> together (peace sign).
               The cursor moves freely without leaving any marks on the canvas.
             </p>
           </div>
 
-          {/* Card 3: Stop / Inactive */}
+          {/* Card 3: Erase Gesture */}
+          <div className="p-4 rounded-2xl bg-slate-900/60 border border-rose-800/40 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-rose-600/10 rounded-full blur-xl group-hover:bg-rose-600/20 transition-all pointer-events-none" />
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">🖐️</span>
+              <div>
+                <h4 className="text-sm font-semibold text-white">Erase Gesture</h4>
+                <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider">
+                  Open Hand / Palm Wiping
+                </span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Open your <strong>entire hand / palm</strong> (3 or more fingers extended) to wipe and erase strokes on the fly without clicking anything.
+            </p>
+          </div>
+
+          {/* Card 4: Stop / Inactive */}
           <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 relative overflow-hidden group">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-2xl">✊</span>
@@ -103,21 +120,20 @@ export const GestureGuideModal: React.FC<GestureGuideModalProps> = ({
             </p>
           </div>
 
-          {/* Card 4: Mouse & Touch Fallback */}
-          <div className="p-4 rounded-2xl bg-slate-900/60 border border-cyan-800/40 relative overflow-hidden group">
+          {/* Card 5: Mouse & Touch Fallback */}
+          <div className="p-4 rounded-2xl bg-slate-900/60 border border-cyan-800/40 relative overflow-hidden group md:col-span-2">
             <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-600/10 rounded-full blur-xl group-hover:bg-cyan-600/20 transition-all pointer-events-none" />
             <div className="flex items-center gap-2 mb-2">
               <MousePointer className="w-5 h-5 text-cyan-400" />
               <div>
-                <h4 className="text-sm font-semibold text-white">Mouse & Touch Mode</h4>
+                <h4 className="text-sm font-semibold text-white">Toolbar & Mouse / Touch Mode</h4>
                 <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider">
-                  Direct Drawing
+                  Toolbar Click & Shortcuts
                 </span>
               </div>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Click and drag to sketch with mouse or touch screen.
-              Access shape tools (lines, rectangles, circles) with precision.
+              You can also click the <strong>Eraser</strong> button on the left Toolbar, or press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[11px] text-cyan-300">E</kbd> on your keyboard to switch to the eraser anytime.
             </p>
           </div>
         </div>

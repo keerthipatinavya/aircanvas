@@ -38,6 +38,7 @@ export function App() {
   const {
     state: trackingState,
     videoRef,
+    stream,
     startCamera,
     stopCamera,
     retry,
@@ -181,6 +182,16 @@ export function App() {
           </div>
         )}
 
+        {/* Hidden persistent tracking video for MediaPipe processing */}
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
+          className="fixed -top-[9999px] -left-[9999px] w-[640px] h-[480px] pointer-events-none opacity-0"
+          aria-hidden="true"
+        />
+
         {/* The Digital Canvas Layer */}
         <DrawingCanvas
           tool={activeTool}
@@ -190,6 +201,7 @@ export function App() {
           strokes={strokes}
           onCommitStroke={handleCommitStroke}
           cursorPosition={trackingState.cursorPosition}
+          normalizedCursorPosition={trackingState.normalizedCursorPosition}
           gesture={trackingState.gesture}
           handDetected={trackingState.handDetected}
           cameraActive={trackingState.cameraActive}
@@ -217,7 +229,7 @@ export function App() {
         {/* Floating Camera Preview PIP */}
         {showWebcamPreview && (
           <CameraPreview
-            videoRef={videoRef}
+            stream={stream}
             cameraActive={trackingState.cameraActive}
             cameraStatus={trackingState.cameraStatus}
             handDetected={trackingState.handDetected}

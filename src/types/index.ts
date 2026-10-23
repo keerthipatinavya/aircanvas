@@ -15,7 +15,7 @@ export interface DrawingStroke {
   endPoint?: Point;
 }
 
-export type GestureType = 'none' | 'draw' | 'hover' | 'stop';
+export type GestureType = 'none' | 'draw' | 'hover' | 'stop' | 'erase';
 
 export type CameraStatus =
   | 'idle'
@@ -43,6 +43,7 @@ export interface HandTrackingState {
   gesture: GestureType;
   cursorPosition: Point | null;
   rawCursorPosition: Point | null;
+  normalizedCursorPosition?: Point | null;
   confidence: number;
   landmarks: HandLandmark[] | null;
   fps: number;

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { DrawingStroke, DrawingTool, Point, GestureType } from '../types';
 import { setupCanvasDPR, redrawCanvas, drawStroke } from '../utils/canvasUtils';
 import { distance2D } from '../utils/gestureUtils';
@@ -13,6 +13,7 @@ interface DrawingCanvasProps {
   onCommitStroke: (stroke: DrawingStroke) => void;
   // Hand tracking inputs
   cursorPosition: Point | null;
+  normalizedCursorPosition?: Point | null;
   gesture: GestureType;
   handDetected: boolean;
   cameraActive: boolean;
@@ -27,6 +28,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   strokes,
   onCommitStroke,
   cursorPosition,
+  normalizedCursorPosition,
   gesture,
   handDetected,
   cameraActive,
@@ -83,9 +85,20 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     redrawCanvas(mainCtx, strokes, dimensions.width, dimensions.height);
   }, [dimensions, strokes]);
 
-  // Air Drawing State Machine: Process cursorPosition and gesture from MediaPipe
+  // Compute canvas-relative air position (normalized or absolute)
+  const activeAirPos: Point | null = useMemo(() => {
+    if (normalizedCursorPosition) {
+      return {
+        x: normalizedCursorPosition.x * dimensions.width,
+        y: normalizedCursorPosition.y * dimensions.height,
+      };
+    }
+    return cursorPosition;
+  }, [normalizedCursorPosition, dimensions.width, dimensions.height, cursorPosition]);
+
+  // Air Drawing State Machine: Process activeAirPos and gesture from MediaPipe
   useEffect(() => {
-    if (!cameraActive || !cursorPosition || !handDetected) {
+    if (!cameraActive || !activeAirPos || !handDetected) {
       // If hand is lost or tracking stops, immediately finalize any active air stroke
       if (currentAirStrokeRef.current) {
         if (currentAirStrokeRef.current.points.length > 0) {
@@ -102,41 +115,53 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     const ctx = mainCanvas.getContext('2d');
     if (!ctx) return;
 
-    if (gesture === 'draw') {
-      // Index extended, middle folded -> DRAW MODE
+    const isErasing = gesture === 'erase' || tool === 'eraser';
+    const effectiveTool: DrawingTool = isErasing ? 'eraser' : tool;
+    const effectiveSize = gesture === 'erase' ? Math.max(brushSize * 2.5, 32) : brushSize;
+
+    if (gesture === 'draw' || gesture === 'erase') {
+      // If switching between drawing and air eraser, commit previous stroke first
+      if (currentAirStrokeRef.current && currentAirStrokeRef.current.tool !== effectiveTool) {
+        if (currentAirStrokeRef.current.points.length > 0) {
+          onCommitStroke(currentAirStrokeRef.current);
+        }
+        currentAirStrokeRef.current = null;
+        lastAirPointRef.current = null;
+      }
+
       if (!currentAirStrokeRef.current) {
         // Start new stroke
         const newStroke: DrawingStroke = {
           id: `air-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          tool,
+          tool: effectiveTool,
           color,
-          size: brushSize,
-          points: [{ ...cursorPosition }],
+          size: effectiveSize,
+          points: [{ ...activeAirPos }],
         };
         currentAirStrokeRef.current = newStroke;
-        lastAirPointRef.current = { ...cursorPosition };
+        lastAirPointRef.current = { ...activeAirPos };
 
         // Draw initial point
         drawStroke(ctx, newStroke);
       } else {
         // Continue active stroke if moved past small jitter threshold
         const lastPt = lastAirPointRef.current;
-        if (lastPt && distance2D(lastPt, cursorPosition) >= 2.0) {
-          currentAirStrokeRef.current.points.push({ ...cursorPosition });
-          lastAirPointRef.current = { ...cursorPosition };
+        if (lastPt && distance2D(lastPt, activeAirPos) >= 2.0) {
+          currentAirStrokeRef.current.points.push({ ...activeAirPos });
+          lastAirPointRef.current = { ...activeAirPos };
 
           // Incrementally draw the latest segment
           const pts = currentAirStrokeRef.current.points;
           if (pts.length >= 2) {
             ctx.save();
-            if (tool === 'eraser') {
+            if (effectiveTool === 'eraser') {
               ctx.globalCompositeOperation = 'destination-out';
               ctx.strokeStyle = 'rgba(0,0,0,1)';
             } else {
               ctx.globalCompositeOperation = 'source-over';
               ctx.strokeStyle = color;
             }
-            ctx.lineWidth = brushSize;
+            ctx.lineWidth = effectiveSize;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
 
@@ -152,7 +177,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         }
       }
     } else {
-      // Gesture is not 'draw' (hover, stop, etc.) -> Finalize stroke
+      // Gesture is not 'draw' or 'erase' (hover, stop, etc.) -> Finalize stroke
       if (currentAirStrokeRef.current) {
         if (currentAirStrokeRef.current.points.length > 0) {
           onCommitStroke(currentAirStrokeRef.current);
@@ -162,7 +187,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       }
     }
   }, [
-    cursorPosition,
+    activeAirPos,
     gesture,
     handDetected,
     cameraActive,
@@ -324,14 +349,35 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       />
 
       {/* Fingertip Air Cursor Indicator */}
-      {cameraActive && cursorPosition && (
+      {cameraActive && activeAirPos && (
         <div
-          className="pointer-events-none fixed z-30 transition-transform duration-75 ease-out"
+          className="pointer-events-none absolute z-30 transition-transform duration-75 ease-out"
           style={{
-            transform: `translate3d(${cursorPosition.x}px, ${cursorPosition.y}px, 0) translate(-50%, -50%)`,
+            transform: `translate3d(${activeAirPos.x}px, ${activeAirPos.y}px, 0) translate(-50%, -50%)`,
           }}
         >
-          {gesture === 'draw' ? (
+          {gesture === 'erase' ? (
+            // Active Erase Cursor: Wide glowing rose eraser circle (Open Palm)
+            <div className="relative flex items-center justify-center">
+              <div
+                className="rounded-full animate-ping opacity-60 bg-rose-500"
+                style={{
+                  width: `${Math.max(brushSize * 2.5, 32)}px`,
+                  height: `${Math.max(brushSize * 2.5, 32)}px`,
+                }}
+              />
+              <div
+                className="absolute rounded-full border-2 border-white shadow-[0_0_15px_rgba(244,63,94,0.9)] bg-rose-500/80"
+                style={{
+                  width: `${Math.max(brushSize * 2.5, 32)}px`,
+                  height: `${Math.max(brushSize * 2.5, 32)}px`,
+                }}
+              />
+              <span className="absolute -bottom-7 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-black/85 text-rose-300 border border-rose-500/50 shadow-lg whitespace-nowrap">
+                🧹 Erasing (Open Palm)
+              </span>
+            </div>
+          ) : gesture === 'draw' ? (
             // Active Drawing Cursor: Pulsing glowing circle
             <div className="relative flex items-center justify-center">
               <div
@@ -343,7 +389,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
                 style={{ backgroundColor: tool === 'eraser' ? '#F43F5E' : color }}
               />
               <span className="absolute -bottom-6 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-black/80 text-cyan-300 border border-cyan-500/40">
-                Drawing
+                {tool === 'eraser' ? 'Erasing' : 'Drawing'}
               </span>
             </div>
           ) : gesture === 'hover' ? (
